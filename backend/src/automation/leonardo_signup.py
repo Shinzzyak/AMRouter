@@ -673,13 +673,27 @@ def run_automation(email, password, invite_link, proxy=None, headless=True):
 
             # Tunggu Leonardo load penuh (pastikan session tersimpan di storage)
             log_step(f"Leonardo page: {page.url[:60]}")
-            log_step("Tunggu load penuh untuk capture session...")
+            log_step("Tunggu networkidle + session cookie set...")
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except: pass
             time.sleep(5)
+
+            # Navigate ke /image-generation untuk force session cookie di-set
+            log_step("Navigate ke image-generation untuk force session cookie...")
+            try:
+                page.goto("https://app.leonardo.ai/ai-generations", wait_until="domcontentloaded", timeout=30000)
+                time.sleep(5)
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except: pass
+            time.sleep(3)
 
             # Extract Leonardo cookies — pakai semua cookies dari context
             log_step("Mengekstrak cookies Leonardo...")
             all_cookies = page.context.cookies()
+            log_step(f"Total cookies: {len(all_cookies)}")
             leo_cookies = [c for c in all_cookies if "leonardo.ai" in (c.get("domain") or "")]
+
             if not leo_cookies:
                 leo_cookies = all_cookies
             cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in leo_cookies)
