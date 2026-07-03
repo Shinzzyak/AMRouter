@@ -201,6 +201,8 @@ def wait_for_otp_from_db(email: str, since_ts: int, settings: dict, timeout: int
         log_step(f"DB tidak ditemukan: {db_path}")
         return "", ""
     deadline = time.time() + timeout
+    alias = email.split('@')[0]
+    last_log = 0
     while time.time() < deadline:
         try: sync_ammail_messages(email, since_ts, settings)
         except Exception: pass
@@ -218,6 +220,12 @@ def wait_for_otp_from_db(email: str, since_ts: int, settings: dict, timeout: int
                 return row["otpCode"] or "", row["verifyUrl"] or ""
             conn.close()
         except Exception: pass
+        # Emit heartbeat setiap 5 detik agar timer UI terus jalan
+        now = time.time()
+        if now - last_log >= 5:
+            remaining = int(deadline - now)
+            log_step(f"Menunggu OTP Canva ({alias}@...) — sisa {remaining}s")
+            last_log = now
         time.sleep(2)
     return "", ""
 
@@ -516,8 +524,9 @@ def run_automation(email, password, invite_link, proxy=None, headless=True):
                 time.sleep(5)
 
             # Tunggu Leonardo dashboard (max 60s)
-            log_step("Menunggu Leonardo dashboard...")
+            log_step("Menunggu redirect ke Leonardo dashboard...")
             deadline_leo = time.time() + 60
+            last_log_leo = 0
             while time.time() < deadline_leo:
                 cur = page.url.lower()
                 if "app.leonardo.ai" in cur and "/auth/" not in cur:
@@ -528,6 +537,12 @@ def run_automation(email, password, invite_link, proxy=None, headless=True):
                         log_step("OAuth popup muncul lagi — klik Allow...")
                         _click_canva_authorize_v2(pg, email)
                         auth_page = pg
+                # Heartbeat setiap 5 detik
+                now = time.time()
+                if now - last_log_leo >= 5:
+                    short = page.url.replace("https://","").replace("www.","")[:50]
+                    log_step(f"Menunggu Leonardo dashboard... [{short}]")
+                    last_log_leo = now
                 time.sleep(2)
 
             # Extract Leonardo cookies
