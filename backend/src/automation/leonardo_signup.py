@@ -499,7 +499,7 @@ def run_automation(email, password, invite_link, proxy=None, headless=True):
 
             # 1. Canva Enroll
             if not enroll_canva_via_email(page, invite_link, email, password, settings):
-                sys.stdout.write(json.dumps({"status": "error", "message": "Gagal pendaftaran Canva"}) + "\n")
+                sys.stdout.write(json.dumps({"status": "error", "message": "Gagal pendaftaran Canva — lihat step log"}) + "\n")
                 sys.stdout.flush()
                 return False
 
@@ -757,7 +757,13 @@ if __name__ == "__main__":
 
     try:
         success = run_automation(args.email, args.password, args.invite_link, proxy, args.headless)
-        print(json.dumps({"success": success, "email": args.email}))
+        if not success:
+            # Emit status:error agar Node handler mark sebagai failed (bukan hanya exit code 0)
+            sys.stdout.write(json.dumps({"status": "error", "message": "Automation gagal tanpa detail — cek log"}) + "\n")
+            sys.stdout.flush()
     except Exception as e:
         log_step(f"ERROR: {str(e)}")
-        print(json.dumps({"success": False, "error": str(e)}))
+        import traceback
+        sys.stderr.write(traceback.format_exc())
+        sys.stdout.write(json.dumps({"status": "error", "message": str(e)}) + "\n")
+        sys.stdout.flush()
