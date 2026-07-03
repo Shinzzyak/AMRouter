@@ -556,24 +556,42 @@ def run_automation(email, password, invite_link, proxy=None, headless=True):
             # Handle Canva Authorize popup
             auth_page = None
             for pg in browser.pages:
-                if "canva.com/api/oauth/authorize" in pg.url:
+                if "canva.com" in pg.url and pg != page:
                     auth_page = pg; break
 
             if auth_page:
-                log_step("OAuth Canva popup — klik Allow/Authorize...")
+                log_step(f"OAuth popup ditemukan: {auth_page.url[:60]}")
                 _click_canva_authorize_v2(auth_page, email)
                 log_step("Authorize diklik, tunggu redirect ke Leonardo...")
                 time.sleep(5)
+            else:
+                log_step(f"Tidak ada popup — cek apakah redirect inline. Pages: {[p.url[:40] for p in browser.pages]}")
+                # Cek apakah main page redirect ke canva OAuth (inline, bukan popup)
+                if "canva.com" in page.url:
+                    log_step(f"Redirect inline ke Canva: {page.url[:60]}")
+                    _click_canva_authorize_v2(page, email)
+                    time.sleep(5)
 
             # Tunggu Leonardo dashboard atau onboarding (max 90s)
             log_step("Menunggu redirect ke Leonardo dashboard/onboarding...")
             deadline_leo = time.time() + 90
             last_log_leo = 0
+            canva_btn_retry = 0
             while time.time() < deadline_leo:
                 cur = page.url.lower()
+
+                # Inline OAuth redirect di main page — handle
+                if "canva.com" in cur and page != auth_page:
+                    log_step(f"Main page redirect ke Canva OAuth: {page.url[:60]}")
+                    _click_canva_authorize_v2(page, email)
+                    auth_page = page
+                    time.sleep(5)
+                    continue
+
                 # Sukses: sudah di luar /auth/
                 if "app.leonardo.ai" in cur and "/auth/" not in cur:
                     log_step(f"Leonardo post-auth page: {page.url[:60]}")
+
                     # Handle onboarding/survey pages — klik Continue/Skip
                     if any(x in cur for x in ["/onboarding", "/survey", "/welcome", "/get-started"]):
                         log_step("Onboarding page — cari tombol Continue/Skip...")
@@ -591,12 +609,38 @@ def run_automation(email, password, invite_link, proxy=None, headless=True):
                             time.sleep(3)
                             continue
                     break
-                # Cek popup auth Canva yang muncul lagi
+                # Cek popup auth Canva baru (deteksi broad: any canva.com page)
                 for pg in browser.pages:
-                    if "canva.com/api/oauth/authorize" in pg.url and pg != auth_page:
-                        log_step("OAuth popup muncul lagi — klik Allow...")
+                    if "canva.com" in pg.url and pg != auth_page and pg != page:
+                        log_step(f"OAuth popup baru: {pg.url[:60]}")
                         _click_canva_authorize_v2(pg, email)
                         auth_page = pg
+                # Retry klik "Continue with Canva" jika stuck di /auth/login > 15s
+                if "/auth/login" in cur and canva_btn_retry < 2:
+                    elapsed_stuck = time.time() - (deadline_leo - 90)
+                    if elapsed_stuck > 15 * (canva_btn_retry + 1):
+                        log_step(f"Stuck di /auth/login, retry klik Continue with Canva ({canva_btn_retry+1}/2)...")
+                        try:
+                            page.goto("https://app.leonardo.ai/auth/login", wait_until="domcontentloaded", timeout=30000)
+                            time.sleep(2)
+                            click_first(page, ["button:has-text('Continue with Canva')"], timeout_ms=10000)
+                            time.sleep(5)
+                            # Cek popup setelah retry
+                            for pg in browser.pages:
+                                if "canva.com" in pg.url and pg != page:
+                                    log_step(f"Popup setelah retry: {pg.url[:60]}")
+                                    _click_canva_authorize_v2(pg, email)
+                                    auth_page = pg
+                                    time.sleep(5)
+                                    break
+                            else:
+                                if "canva.com" in page.url:
+                                    _click_canva_authorize_v2(page, email)
+                                    auth_page = page
+                                    time.sleep(5)
+                        except Exception as _e:
+                            log_step(f"Retry gagal: {_e}")
+                        canva_btn_retry += 1
                 # Heartbeat setiap 5 detik
                 now = time.time()
                 if now - last_log_leo >= 5:
@@ -618,10 +662,16 @@ def run_automation(email, password, invite_link, proxy=None, headless=True):
                 leo_cookies = all_cookies
             cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in leo_cookies)
 
-            # === LOGIKA DARI LEOAPI-MAIN ===
-            # Leonardo pakai next-auth, session token ada di cookie
-            # next-auth.session-token ADALAH JWT Bearer yang valid
+            # === LOGIKA DARI LEOAPI-MAIN (updated untuk better-auth) ===
+            # Leonardo migrasi dari next-auth ke better-auth
+            # Token ada di: __Secure-better-auth.session_data.* atau session_token
             SESSION_TOKEN_NAMES = [
+                # better-auth (baru — Leonardo pakai ini sekarang)
+                "__Secure-better-auth.session_data.0",
+                "__Secure-better-auth.session_data.1",
+                "better-auth.session_token",
+                "__Secure-better-auth.session_token",
+                # next-auth (lama — fallback)
                 "__Secure-next-auth.session-token",
                 "next-auth.session-token",
                 "__Secure-authjs.session-token",
