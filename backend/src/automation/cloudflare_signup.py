@@ -59,15 +59,27 @@ def wait_for_cf_verify_email(base_url, api_key, email, timeout=120):
     log_step(f"Menunggu email verifikasi Cloudflare ({email})...")
     alias = email.split("@")[0]
     deadline = time.time() + timeout
+    seen_ids = set()
     while time.time() < deadline:
         try:
             data = ammail_request(base_url, api_key, f"/inboxes/{urllib.parse.quote(alias)}/messages")
             messages = data.get("messages", [])
             for msg in messages:
+                msg_id = msg.get("id", "")
                 subject = msg.get("subject", "")
-                body = msg.get("body", msg.get("html", msg.get("text", "")))
+                if msg_id in seen_ids:
+                    continue
+                seen_ids.add(msg_id)
                 if "cloudflare" in subject.lower() or "verify" in subject.lower() or "confirm" in subject.lower():
+                    # Fetch full message body
+                    try:
+                        full = ammail_request(base_url, api_key, f"/messages/{urllib.parse.quote(msg_id)}")
+                        msg_body = full.get("message", full)
+                        body = msg_body.get("body", msg_body.get("html", msg_body.get("text", "")))
+                    except Exception:
+                        body = msg.get("snippet", "")
                     patterns = [
+                        r'https://dash\.cloudflare\.com/email-verification[^\s\'"<>]+',
                         r'https://[^\s\'"<>]*confirm[^\s\'"<>]*',
                         r'https://[^\s\'"<>]*verify[^\s\'"<>]*',
                         r'https://dash\.cloudflare\.com/[^\s\'"<>]+',
@@ -79,7 +91,7 @@ def wait_for_cf_verify_email(base_url, api_key, email, timeout=120):
                             log_step(f"Link verifikasi ditemukan!")
                             return link
         except Exception as e:
-            pass
+            log_step(f"Ammail poll error: {e}")
         time.sleep(5)
     return None
 
@@ -624,48 +636,119 @@ def main():
             time.sleep(2)
         except Exception as e:
             log_step(f"Dashboard load warning: {e}")
+            # Try opening a new page if current one died
+            try:
+                page = browser.new_page()
+                page.goto("https://dash.cloudflare.com/", wait_until="domcontentloaded", timeout=30000)
+                wait_for_cf_clearance(page, timeout=20)
+                time.sleep(2)
+            except Exception as e2:
+                log_step(f"New page also failed: {e2}")
 
         # Extract account_id from URL
         account_id = ""
-        for _ in range(5):
-            url_match = re.search(r"/([a-f0-9]{32})(?:/|$)", page.url)
-            if url_match:
-                account_id = url_match.group(1)
-                log_step(f"Account ID: {account_id[:8]}...")
-                break
-            time.sleep(1)
+        try:
+            for _ in range(6):
+                url_match = re.search(r"/([a-f0-9]{32})(?:/|$)", page.url)
+                if url_match:
+                    account_id = url_match.group(1)
+                    log_step(f"Account ID: {account_id[:8]}...")
+                    break
+                time.sleep(1)
+        except Exception as e:
+            log_step(f"account_id extract error: {e}")
 
         # ── Step 9: Extract Global API Key ────────────────────────────────────
-        global_key = extract_global_api_key(page, args.password)
+        global_key = None
+        try:
+            global_key = extract_global_api_key(page, args.password)
+        except Exception as e:
+            log_step(f"extract_global_api_key failed: {e}")
 
         if not global_key:
-            log_step("Global API Key tidak bisa diambil, coba ambil via URL account_id...")
-            # Try to get from dashboard URL pattern
-            try:
-                page.goto("https://dash.cloudflare.com/profile/api-tokens", wait_until="domcontentloaded", timeout=20000)
-                wait_for_cf_clearance(page, timeout=15)
-                time.sleep(2)
-                # Check URL for account_id
-                url_match = re.search(r"/([a-f0-9]{32})", page.url)
-                if url_match and not account_id:
-                    account_id = url_match.group(1)
-            except Exception:
-                pass
+            log_step("Global API Key tidak bisa diambil langsung...")
 
         if not global_key and not account_id:
             die("Tidak bisa mengambil API Key atau Account ID. Coba manual.")
 
-        # ── Step 10: Create Workers AI token using Global API Key ──────────────
+        # ── Step 10: Create Workers AI token ──────────────────────────────────
         workers_ai_token = None
+
+        # 10a: Via CF REST API using Global API Key (fastest)
         if global_key and account_id:
-            log_step("Membuat Workers AI API Token...")
+            log_step("Membuat Workers AI API Token via API...")
             workers_ai_token = create_workers_ai_token(global_key, args.email, account_id)
             if workers_ai_token:
-                log_step("Workers AI Token berhasil dibuat!")
-            else:
-                log_step("Gagal buat token via API, gunakan Global API Key sebagai fallback...")
+                log_step("Workers AI Token berhasil dibuat via API!")
 
-        # Use Workers AI token preferably, fallback to Global API Key
+        # 10b: Via browser — navigate to Create Token page and fill form
+        if not workers_ai_token and account_id:
+            log_step("Mencoba buat API Token via browser...")
+            try:
+                page.goto(
+                    f"https://dash.cloudflare.com/{account_id}/api-tokens/create",
+                    wait_until="domcontentloaded", timeout=20000
+                )
+                wait_for_cf_clearance(page, timeout=15)
+                time.sleep(2)
+
+                # Use "Workers AI" template if available
+                for sel in [
+                    "button:has-text('Workers AI')",
+                    "a:has-text('Workers AI')",
+                    "[data-testid='workers-ai-template']",
+                ]:
+                    try:
+                        t = page.locator(sel).first
+                        if t.is_visible(timeout=2000):
+                            t.click()
+                            time.sleep(2)
+                            break
+                    except Exception:
+                        continue
+
+                # Continue to summary → Create Token
+                for sel in ["button:has-text('Continue to summary')", "button:has-text('Next')"]:
+                    try:
+                        b = page.locator(sel).first
+                        if b.is_visible(timeout=2000):
+                            b.click()
+                            time.sleep(2)
+                            break
+                    except Exception:
+                        continue
+
+                for sel in ["button:has-text('Create Token')", "button[type='submit']"]:
+                    try:
+                        b = page.locator(sel).last
+                        if b.is_visible(timeout=2000):
+                            b.click()
+                            time.sleep(3)
+                            break
+                    except Exception:
+                        continue
+
+                # Extract created token
+                for sel in ["code", "input[readonly]", "[data-testid='token-value']", ".cf-input-code"]:
+                    try:
+                        el = page.locator(sel).first
+                        if el.is_visible(timeout=3000):
+                            val = el.input_value() if "input" in sel else el.text_content()
+                            if val and len(val.strip()) > 10:
+                                workers_ai_token = val.strip()
+                                log_step("Workers AI Token berhasil dibuat via browser!")
+                                break
+                    except Exception:
+                        continue
+
+                if not workers_ai_token:
+                    # Fallback: use Global API Key if we got it
+                    page.screenshot(path="/tmp/cf_create_token.png")
+                    log_step("Screenshot: /tmp/cf_create_token.png")
+            except Exception as e:
+                log_step(f"Browser token creation error: {e}")
+
+        # Final API key to save
         final_api_key = workers_ai_token or global_key or ""
 
         if not final_api_key:
