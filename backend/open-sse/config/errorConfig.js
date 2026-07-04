@@ -65,6 +65,10 @@ export const ERROR_RULES = [
   { text: "only available on paid plans", cooldownMs: COOLDOWN.exhausted },
   { text: "failed to capture weavy firebase id token", cooldownMs: COOLDOWN.exhausted },
   { text: "trial version is not yet", cooldownMs: COOLDOWN.exhausted },
+  { text: "neurons",                  cooldownMs: COOLDOWN.exhausted }, // CF Workers AI daily quota
+  { text: "daily free allocation",    cooldownMs: COOLDOWN.exhausted }, // CF Workers AI daily quota
+  { text: "upgrade to cloudflare",    cooldownMs: COOLDOWN.exhausted }, // CF Workers AI paid plan prompt
+  { text: "4006",                     cooldownMs: COOLDOWN.exhausted }, // CF Workers AI error code
   { text: "no credentials",           cooldownMs: COOLDOWN.long },
   { text: "request not allowed",      cooldownMs: COOLDOWN.short },
   { text: "improperly formed request", cooldownMs: COOLDOWN.long },
