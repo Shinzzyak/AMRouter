@@ -1332,12 +1332,12 @@ def main():
                             except Exception:
                                 pass
                     route.fulfill(response=resp)
-                except Exception as re:
+                except Exception as route_err:
                     try: route.continue_()
                     except Exception: pass
             try:
                 page.route("**/user/tokens**", _token_route_handler)
-            except Exception as re:
+            except Exception as route_err:
                 log_step(f"Route setup: {re}")
 
             for create_url in [
