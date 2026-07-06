@@ -1642,7 +1642,8 @@ def main():
             time.sleep(1)
 
             # Account Resources must be set — template leaves it as "Select..."
-            # Try JS: find "Select..." placeholder and click it, then pick "All accounts"
+            # Strategy: find the Select... placeholder in Account Resources row, click it,
+            # then click the FIRST visible option (might be account name, not "All accounts")
             try:
                 ar_result = page.evaluate("""
                     () => {
@@ -1650,7 +1651,7 @@ def main():
                         for (const el of all) {
                             if (el.children.length === 0 && el.textContent.trim() === 'Select...') {
                                 el.click();
-                                return 'clicked: ' + el.tagName;
+                                return 'clicked: ' + el.tagName + ' ' + el.className.substring(0,30);
                             }
                         }
                         return 'not found';
@@ -1658,17 +1659,58 @@ def main():
                 """)
                 log_step(f"Account Resources Select...: {ar_result}")
                 if "clicked" in ar_result:
-                    time.sleep(0.8)
-                    for opt_sel in ["text='All accounts'", "[role='option']:has-text('All accounts')", "li:has-text('All accounts')"]:
+                    time.sleep(1.0)
+                    # Log all visible options for debugging
+                    try:
+                        opts_text = page.evaluate("""
+                            () => {
+                                const opts = Array.from(document.querySelectorAll("[role='option'], li[class*='option'], [class*='menu'] [class*='option']"));
+                                return opts.filter(o => o.offsetParent !== null).map(o => o.textContent.trim()).slice(0, 10);
+                            }
+                        """)
+                        log_step(f"Account Resources options: {opts_text}")
+                    except Exception:
+                        pass
+
+                    # Try "All accounts" text first, then fall back to first available option
+                    acct_selected = False
+                    for opt_sel in [
+                        "text='All accounts'",
+                        "[role='option']:has-text('All accounts')",
+                        "li:has-text('All accounts')",
+                        "text='All Accounts'",
+                    ]:
                         try:
                             opt = page.locator(opt_sel).first
-                            if opt.count() > 0 and opt.is_visible(timeout=1500):
+                            if opt.count() > 0 and opt.is_visible(timeout=1000):
                                 opt.click()
                                 time.sleep(0.5)
-                                log_step("Account Resources: All accounts selected")
+                                log_step(f"Account Resources selected via: {opt_sel}")
+                                acct_selected = True
                                 break
                         except Exception:
                             continue
+
+                    # Last resort: click the first visible option (whatever it is)
+                    if not acct_selected:
+                        try:
+                            first_opt = page.locator("[role='option'], li[class*='option']").first
+                            if first_opt.count() > 0 and first_opt.is_visible(timeout=1000):
+                                txt = first_opt.text_content() or "?"
+                                first_opt.click()
+                                time.sleep(0.5)
+                                log_step(f"Account Resources first option selected: {txt[:50]}")
+                                acct_selected = True
+                        except Exception as e:
+                            log_step(f"Account Resources first option failed: {e}")
+
+                    if not acct_selected:
+                        # Try Playwright locator approach as final fallback
+                        try:
+                            page.get_by_role("option").first.click(timeout=1000)
+                            log_step("Account Resources: get_by_role option clicked")
+                        except Exception:
+                            log_step("Account Resources: all strategies failed")
             except Exception as e:
                 log_step(f"Account Resources error: {e}")
 
