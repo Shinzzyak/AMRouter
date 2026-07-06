@@ -1237,25 +1237,60 @@ def main():
             # Helper: dismiss any OneTrust / GDPR cookie consent dialogs
             def dismiss_consent_dialogs(page):
                 """Dismiss OneTrust, cookie consent, GDPR popups that block the page."""
+                dismissed = False
                 for sel in [
                     "button#onetrust-accept-btn-handler",
+                    "button#accept-recommended-btn-handler",
+                    "#onetrust-accept-btn-handler",
                     "button:has-text('Accept all')",
                     "button:has-text('Accept All')",
+                    "button:has-text('Accept All Cookies')",
                     "button:has-text('I Accept')",
                     "button:has-text('Accept')",
                     "button:has-text('Agree')",
+                    "button:has-text('Confirm')",
+                    "button:has-text('Save Preferences')",
                     "[id*='accept'][id*='cookie']",
                     ".ot-sdk-btn-floating",
+                    "[class*='onetrust'] button[class*='accept']",
+                    "[class*='onetrust'] button[class*='confirm']",
                 ]:
                     try:
                         el = page.locator(sel).first
-                        if el.count() > 0 and el.is_visible(timeout=1000):
+                        if el.count() > 0 and el.is_visible(timeout=800):
                             el.click()
                             log_step(f"Dismissed consent via: {sel}")
                             time.sleep(0.5)
+                            dismissed = True
                             break
                     except Exception:
                         continue
+                # Also try JS dismiss as backup (covers any modal/overlay)
+                if not dismissed:
+                    try:
+                        result = page.evaluate("""
+                            () => {
+                                // Try standard OneTrust dismiss
+                                const btns = Array.from(document.querySelectorAll('button'));
+                                for (const btn of btns) {
+                                    const txt = btn.textContent.trim().toLowerCase();
+                                    if (txt === 'accept all' || txt === 'accept all cookies' ||
+                                        txt === 'i accept' || txt === 'save preferences' ||
+                                        btn.id === 'onetrust-accept-btn-handler') {
+                                        btn.click();
+                                        return 'JS dismissed: ' + btn.textContent.trim();
+                                    }
+                                }
+                                // Hide OneTrust overlay if present
+                                const ot = document.querySelector('#onetrust-consent-sdk, .onetrust-pc-dark-filter');
+                                if (ot) { ot.style.display = 'none'; return 'hidden onetrust overlay'; }
+                                return 'no consent dialog found';
+                            }
+                        """)
+                        if "dismissed" in result or "hidden" in result:
+                            log_step(f"Consent JS: {result}")
+                    except Exception:
+                        pass
 
             # 1. Navigate to profile/api-tokens (not account-specific)
             page.goto("https://dash.cloudflare.com/profile/api-tokens", wait_until="domcontentloaded", timeout=25000)
@@ -1277,29 +1312,24 @@ def main():
                     continue
 
             # Wait for template page content (React routing — URL stays same)
-            try:
-                page.wait_for_selector(
-                    "button:has-text('Use template'), text=Workers AI, text=Create Custom Token",
-                    timeout=8000
-                )
-                time.sleep(1)
-            except Exception:
-                time.sleep(3)
+            # OneTrust GDPR consent dialog can appear AFTER navigating to template page
+            # — retry dismiss up to 3x while waiting for template buttons
+            workers_ai_template_used = False
+            template_page_ready = False
+            for _wait_attempt in range(3):
+                try:
+                    page.wait_for_selector("button:has-text('Use template')", timeout=5000)
+                    template_page_ready = True
+                    log_step(f"Template page ready (attempt {_wait_attempt+1})")
+                    break
+                except Exception:
+                    log_step(f"Template wait timeout attempt {_wait_attempt+1} — dismissing consent")
+                    dismiss_consent_dialogs(page)
+                    time.sleep(2)
+
             dismiss_consent_dialogs(page)
             page.screenshot(path="/tmp/cf_create_token_page.png")
             log_step(f"After Create Token click: {page.url}")
-
-            # STRATEGY: Use "Workers AI" template directly — much more reliable than custom token form
-            # The template page has a "Workers AI" row with "Use template" button
-            workers_ai_template_used = False
-
-            # Wait explicitly for template page to fully hydrate
-            try:
-                page.wait_for_selector("button:has-text('Use template')", timeout=8000)
-                time.sleep(0.5)
-                log_step("Template page ready")
-            except Exception:
-                log_step("Template page wait timeout, trying anyway")
 
             try:
                 # Find the "Workers AI" template row and click its "Use template" button
