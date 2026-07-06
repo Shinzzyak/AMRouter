@@ -6,6 +6,14 @@
 
 ---
 
+## Screenshots
+
+| Login Page | Quota Tracker |
+|:---:|:---:|
+| ![Login Page](docs/screnshoot/login-page.png) | ![Quota Tracker](docs/screnshoot/quota-tracker.png) |
+
+---
+
 ## Features
 
 - **OpenAI-compatible API** — works with any client that supports `/v1/chat/completions`, `/v1/images/generations`, `/v1/audio/speech`, `/v1/embeddings`, etc.
