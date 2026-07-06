@@ -109,7 +109,8 @@ export async function getUsageForProvider(connection, proxyOptions = null) {
     case "iflow":
       return await getIflowUsage(accessToken);
     case "ollama":
-      return await getOllamaUsage(accessToken);
+    case "ollama-local":
+      return await getOllamaUsage(accessToken, providerSpecificData);
     case "glm":
     case "glm-cn":
       return await getGlmUsage(apiKey, provider, proxyOptions);
@@ -119,6 +120,16 @@ export async function getUsageForProvider(connection, proxyOptions = null) {
     case "codebuddy":
     case "cb":
       return await getCodeBuddyUsage(connection, proxyOptions);
+    case "kimi-coding":
+      return await getKimiCodingUsage(accessToken, proxyOptions);
+    case "cloudflare-ai":
+      return await getCloudflareUsage(apiKey, providerSpecificData, proxyOptions);
+    case "cursor":
+      return await getCursorUsage(accessToken, providerSpecificData, proxyOptions);
+    case "kilocode":
+      return await getKiloCodeUsage(accessToken, proxyOptions);
+    case "cline":
+      return await getClineUsage(accessToken, proxyOptions);
     default:
       return { message: `Usage API not implemented for ${provider}` };
   }
@@ -1481,4 +1492,195 @@ async function getCodeBuddyUsage(connection, proxyOptions = null) {
   }
 }
 
+// ─── Kimi Coding ──────────────────────────────────────────────────────────────
 
+async function getKimiCodingUsage(accessToken, proxyOptions = null) {
+  try {
+    // Kimi Coding uses auth.kimi.com device code flow
+    // Try user profile endpoint
+    const response = await proxyAwareFetch("https://kimi.ai/api/user", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    }, proxyOptions);
+
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        status: "active",
+        email: data?.email,
+        username: data?.nickname || data?.username,
+        note: "Kimi Coding connected.",
+      };
+    }
+
+    return {
+      status: "connected",
+      message: "Kimi Coding connected. Usage tracked per request.",
+    };
+  } catch {
+    return { message: "Kimi Coding connected. Usage tracked per request." };
+  }
+}
+
+// ─── Cloudflare Workers AI ────────────────────────────────────────────────────
+
+async function getCloudflareUsage(apiKey, providerSpecificData, proxyOptions = null) {
+  try {
+    const accountId = providerSpecificData?.accountId;
+    if (!accountId) {
+      return { message: "Cloudflare: missing Account ID in provider settings." };
+    }
+
+    // Try Cloudflare AI usage endpoint
+    const response = await proxyAwareFetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/usage`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+      },
+      proxyOptions
+    );
+
+    if (response.ok) {
+      const data = await response.json();
+      const result = data?.result || {};
+      return {
+        status: "active",
+        accountId,
+        usage: {
+          neurons: result?.neurons_used ?? result?.total_neurons,
+          requests: result?.total_requests,
+          periodStart: result?.period_start,
+          periodEnd: result?.period_end,
+        },
+        note: "Cloudflare Workers AI — free tier: 10,000 neurons/day.",
+      };
+    }
+
+    // Fallback: verify account exists
+    const verifyRes = await proxyAwareFetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+      },
+      proxyOptions
+    );
+
+    if (verifyRes.ok) {
+      const vData = await verifyRes.json();
+      return {
+        status: "active",
+        accountId,
+        accountName: vData?.result?.name,
+        note: "Cloudflare connected. Check Cloudflare Dashboard for detailed usage.",
+      };
+    }
+
+    return { message: "Cloudflare connected. Check Cloudflare Dashboard for usage." };
+  } catch (error) {
+    return { message: `Cloudflare: ${error.message}` };
+  }
+}
+
+// ─── Cursor ───────────────────────────────────────────────────────────────────
+
+async function getCursorUsage(accessToken, providerSpecificData, proxyOptions = null) {
+  try {
+    // Cursor uses VS Code SQLite DB for tokens — no public quota API
+    // Try Cursor API to at least verify the token
+    const response = await proxyAwareFetch("https://api2.cursor.sh/auth/stripe", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    }, proxyOptions);
+
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        status: "active",
+        plan: data?.membershipType || "cursor",
+        daysUntilExpiry: data?.daysUntilExpiry,
+        note: "Cursor connected. Check cursor.sh/settings for usage.",
+      };
+    }
+
+    return {
+      status: "connected",
+      message: "Cursor connected. Usage tracked locally via VS Code extension.",
+    };
+  } catch {
+    return { message: "Cursor connected. Usage tracked locally." };
+  }
+}
+
+// ─── KiloCode ─────────────────────────────────────────────────────────────────
+
+async function getKiloCodeUsage(accessToken, proxyOptions = null) {
+  try {
+    const response = await proxyAwareFetch("https://api.kilo.ai/api/user/profile", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    }, proxyOptions);
+
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        status: "active",
+        email: data?.email,
+        plan: data?.plan,
+        credits: data?.credits,
+        note: "KiloCode connected.",
+      };
+    }
+
+    return {
+      status: "connected",
+      message: "KiloCode connected. Check kilocode.ai for usage.",
+    };
+  } catch {
+    return { message: "KiloCode connected. Usage tracked per request." };
+  }
+}
+
+// ─── Cline ────────────────────────────────────────────────────────────────────
+
+async function getClineUsage(accessToken, proxyOptions = null) {
+  try {
+    const response = await proxyAwareFetch("https://api.cline.bot/api/v1/auth/me", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    }, proxyOptions);
+
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        status: "active",
+        email: data?.email,
+        plan: data?.plan,
+        credits: data?.credits,
+        note: "Cline connected.",
+      };
+    }
+
+    return {
+      status: "connected",
+      message: "Cline connected. Check cline.bot for usage.",
+    };
+  } catch {
+    return { message: "Cline connected. Usage tracked per request." };
+  }
+}

@@ -274,15 +274,18 @@ export const USAGE_SUPPORTED_PROVIDERS = [
   "codex",
   "kimi-coding",
   "ollama",
+  "ollama-local",
   "gemini-cli",
   "glm",
   "glm-cn",
   "minimax",
   "minimax-cn",
   "codebuddy",
-  "leonardo",
-  "weavy",
   "cloudflare-ai",
+  "cursor",
+  "qwen",
+  "kilocode",
+  "cline",
 ];
 
 // Subset that uses apikey auth (still surfaced on quota page)
