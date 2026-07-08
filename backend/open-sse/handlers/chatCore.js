@@ -141,13 +141,17 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     log?.debug?.("CODEBUDDY", "Sanitized system prompt for Tencent content moderation");
   }
 
-  // Cloudflare Workers AI: cap max_tokens + truncate messages to prevent runaway reasoning.
+   // Cloudflare Workers AI: cap max_tokens + truncate messages to prevent runaway reasoning.
   // Free tier has ~75s execution limit and very limited compute.
   // 104K tokens context = always slow/timeout. Keep last 20 msgs to stay under ~25K tokens.
   if (provider === "cloudflare-ai") {
-    // Cap output tokens
-    if (!translatedBody.max_tokens) {
-      translatedBody.max_tokens = 8192;
+    // Reasoning models (glm-5.2, kimi-k2, qwq, deepseek-r1) exhaust token budget on
+    // reasoning_content before producing actual output → client sees silence until CF timeout (75s).
+    // Cap to 4096 for these models so output arrives sooner.
+    const isReasoningModel = stripList?.includes("thinking");
+    const cfMaxTokens = isReasoningModel ? 4096 : 8192;
+    if (!translatedBody.max_tokens || translatedBody.max_tokens > cfMaxTokens) {
+      translatedBody.max_tokens = cfMaxTokens;
     }
 
     // Truncate messages: keep system (idx 0) + last 20 non-system messages
@@ -160,6 +164,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       log?.info?.("CF-AI", `Truncated ${before} → ${translatedBody.messages.length} msgs (kept last 20 + system)`);
     }
   }
+
 
   const executor = getExecutor(provider);
   trackPendingRequest(model, provider, connectionId, true);
