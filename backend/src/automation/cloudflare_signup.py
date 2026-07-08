@@ -158,7 +158,31 @@ def get_turnstile_sitekey(page, fallback=CF_SIGNUP_TURNSTILE_SITEKEY):
     return fallback
 
 
-def solve_turnstile_2captcha(api_key, page_url, sitekey, timeout=120):
+def get_turnstile_action(page, default=None):
+    """Extract data-action from Turnstile widget on page."""
+    try:
+        action = page.evaluate(r"""
+            () => {
+                // Method 1: data-action on cf-turnstile div
+                const el = document.querySelector('[data-action], .cf-turnstile, [data-cf-turnstile-response]');
+                if (el && el.getAttribute('data-action')) return el.getAttribute('data-action');
+                // Method 2: scan iframe src for action param
+                for (const iframe of document.querySelectorAll('iframe')) {
+                    const src = iframe.src || '';
+                    const m = src.match(/[?&]action=([^&]+)/);
+                    if (m) return decodeURIComponent(m[1]);
+                }
+                return null;
+            }
+        """)
+        if action:
+            return action.strip()
+    except Exception:
+        pass
+    return default
+
+
+def solve_turnstile_2captcha(api_key, page_url, sitekey, timeout=120, action=None, data=None):
     """Submit Turnstile to 2Captcha and wait for solution token."""
     log_step("Mengirim Turnstile ke 2Captcha untuk diselesaikan...")
     try:
@@ -170,6 +194,11 @@ def solve_turnstile_2captcha(api_key, page_url, sitekey, timeout=120):
             "pageurl": page_url,
             "json": 1,
         }
+        if action:
+            submit_data["action"] = action
+            log_step(f"2Captcha Turnstile action: {action}")
+        if data:
+            submit_data["data"] = data
         encoded = urllib.parse.urlencode(submit_data).encode()
         req = urllib.request.Request("https://2captcha.com/in.php", data=encoded)
         with urllib.request.urlopen(req, timeout=15) as r:
@@ -1451,11 +1480,14 @@ def main():
                                         log_step("GAK TS: injecting 2Captcha token...")
                                         try:
                                             _gak_sitekey = get_turnstile_sitekey(page)
+                                            _gak_action = get_turnstile_action(page, default="managed")
+                                            log_step(f"GAK TS action: {_gak_action}")
                                             _gak_ts_tok = solve_turnstile_2captcha(
                                                 args.captcha_key,
                                                 "https://dash.cloudflare.com/profile/api-tokens",
                                                 _gak_sitekey,
                                                 timeout=120,
+                                                action=_gak_action,
                                             )
                                             if _gak_ts_tok:
                                                 page.evaluate(f"""
