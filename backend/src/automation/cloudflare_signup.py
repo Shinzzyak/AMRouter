@@ -1259,27 +1259,48 @@ def main():
 
                 # Intercept CF API response to capture Global API Key from network
                 _intercepted_key = []
+                _captcha_challenge = {}  # captures context=apikey challenge response
                 def _on_gak_response(resp):
                     try:
                         url = resp.url
-                        # Log ALL CF API calls during GAK flow
                         if 'cloudflare.com/api' in url or '/api/v4/' in url:
                             log_step(f"CF API call: {resp.status} {url[-80:]}")
+                        # Capture challenge token issued by CF (needed for GAK POST)
+                        if 'captcha/challenge' in url and 'context=apikey' in url and resp.status == 200:
+                            try:
+                                body = resp.json()
+                                log_step(f"GAK captcha/challenge body: {str(body)[:400]}")
+                                _captcha_challenge.update(body.get('result', {}) or {})
+                            except Exception as _ce:
+                                log_step(f"captcha/challenge parse error: {_ce}")
+                        # Log full body for user/api_key
+                        if 'user/api_key' in url:
+                            try:
+                                body = resp.json()
+                                log_step(f"GAK api_key {resp.status} body: {str(body)[:400]}")
+                                if resp.status == 200:
+                                    result = body.get('result', {}) or {}
+                                    key = (result.get('api_key') or result.get('key') or
+                                           result.get('value') or result.get('global_key') or '')
+                                    if key and len(key) > 20:
+                                        log_step(f"GAK key from api_key 200: {key[:12]}...")
+                                        _intercepted_key.append(key)
+                            except Exception as _re:
+                                log_step(f"GAK api_key body error: {_re}")
+                            return
                         if resp.status == 200 and ('api_key' in url or 'global_key' in url or
                                 'user/api' in url or 'verify' in url):
                             try:
                                 body = resp.json()
                                 result = body.get('result', {}) or {}
-                                # CF Global API Key response: result.api_key
                                 key = (result.get('api_key') or result.get('key') or
                                        result.get('value') or result.get('global_key') or '')
                                 if not key:
-                                    # Also scan all string values in result
-                                    for v in result.values() if isinstance(result, dict) else []:
+                                    for v in (result.values() if isinstance(result, dict) else []):
                                         if isinstance(v, str) and len(v) > 30:
                                             key = v; break
                                 if key and len(key) > 20:
-                                    log_step(f"GAK intercepted from network ({url[-40:]}): {key[:12]}...")
+                                    log_step(f"GAK intercepted ({url[-40:]}): {key[:12]}...")
                                     _intercepted_key.append(key)
                             except Exception:
                                 pass
