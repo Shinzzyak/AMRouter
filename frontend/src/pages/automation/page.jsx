@@ -1548,6 +1548,26 @@ function AmmailTab() {
     }
   };
 
+  const handleDeleteAllInboxes = async () => {
+    if (!confirm(`Hapus SEMUA inbox (${inboxes.length} inbox)? Action ini tidak bisa dibatalkan.`)) return;
+    try {
+      setInboxes([]); // optimistic clear
+      setSelectedInboxAddress("");
+      const res = await fetch("/api/automation/ammail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "inboxes-delete-all" })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        loadState();
+      }
+    } catch (e) {
+      console.error(e);
+      loadState();
+    }
+  };
+
   const handleDeleteInbox = async (alias) => {
     if (!confirm(`Hapus inbox ${alias}?`)) return;
     try {
@@ -1704,9 +1724,9 @@ function AmmailTab() {
           </Button>
         </div>
       ) : (
-        <div className="flex-1 flex divide-x divide-border-subtle min-h-0">
+        <div className="flex-1 flex flex-col md:flex-row md:divide-x md:divide-y-0 divide-y divide-border-subtle min-h-0 overflow-y-auto md:overflow-hidden">
           {/* 1. Left sidebar */}
-          <aside className="w-60 shrink-0 bg-surface/40 flex flex-col min-h-0">
+          <aside className="w-full md:w-60 shrink-0 bg-surface/40 flex flex-col min-h-[200px] md:min-h-0 md:h-full">
             <div className="p-4 border-b border-border-subtle flex items-center justify-between gap-3">
               <span 
                 className="text-xs font-bold text-text-main flex items-center gap-1.5"
@@ -1848,6 +1868,14 @@ function AmmailTab() {
               <div>
                 <p className="px-3 text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2">
                   Active Inboxes ({inboxes.length})
+                  {inboxes.length > 0 && (
+                    <button
+                      onClick={handleDeleteAllInboxes}
+                      className="ml-2 text-[9px] text-red-400 hover:text-red-300 font-normal normal-case tracking-normal"
+                    >
+                      🗑️ Hapus Semua
+                    </button>
+                  )}
                 </p>
                 <div className="space-y-0.5">
                   {inboxes
@@ -1919,7 +1947,7 @@ function AmmailTab() {
           </aside>
 
           {/* 2. Middle list */}
-          <section className="w-80 shrink-0 flex flex-col min-h-0 bg-surface/10">
+          <section className="w-full md:w-80 shrink-0 flex flex-col min-h-[300px] md:min-h-0 md:h-full bg-surface/10">
             <div className="p-3 border-b border-border-subtle flex items-center justify-between gap-2 bg-surface/10">
               <span className="text-xs font-bold text-text-muted uppercase tracking-wider pl-1">
                 Messages
@@ -2015,7 +2043,7 @@ function AmmailTab() {
           </section>
 
           {/* 3. Right detail */}
-          <article className="flex-1 flex flex-col min-h-0 bg-surface/5">
+          <article className="flex-1 flex flex-col min-h-[400px] md:min-h-0 md:h-full bg-surface/5">
             {selectedOtpId === null ? (
               <div className="flex-1 flex items-center justify-center text-text-muted text-xs italic">
                 Select an email to read its contents.

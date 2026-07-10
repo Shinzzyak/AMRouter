@@ -29,3 +29,10 @@ out/
 backend/profiles/
 backend/canva_debug/
 har/
+
+# Browser profiles / automation state
+backend/src/automation/profiles/
+*.sqlite
+*.sqlite-wal
+*.sqlite-journal
+*.db

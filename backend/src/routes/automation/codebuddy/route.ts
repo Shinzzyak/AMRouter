@@ -38,6 +38,7 @@ function parseProxyString(raw) {
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import { getSettings, updateSettings } from "../../../lib/localDb.js";

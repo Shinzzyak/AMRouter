@@ -427,8 +427,8 @@ export async function POST_handler(req, res) {
     if (action === "inbox-create") {
       const { alias, domain } = body;
       try {
-        const res = await client.createInbox(alias, domain);
-        return res.json({ ok: true, inbox: res.inbox });
+        const created = await client.createInbox(alias, domain);
+        return res.json({ ok: true, inbox: created.inbox });
       } catch (e) {
         return res.status(502).json({ error: e.message || String(e) });
       }
@@ -484,6 +484,32 @@ export async function POST_handler(req, res) {
         return res.json({ ok });
       } catch (e) {
         return res.status(502).json({ error: e.message || String(e) });
+      }
+    }
+
+    // ── Action: Delete ALL Inboxes ─────────────────────────────────
+    if (action === "inboxes-delete-all") {
+      try {
+        const inboxes = await client.listInboxes();
+        let deleted = 0;
+        let errors = [];
+        for (const inbox of inboxes) {
+          const alias = (inbox.address || "").split("@")[0];
+          if (!alias) continue;
+          try {
+            await client.deleteInbox(alias);
+            deleted++;
+          } catch (e) {
+            errors.push({ alias, error: e.message || String(e) });
+          }
+          // Also clean local OTP records
+          try {
+            await deleteAmmailOtpsBulk({ alias });
+          } catch (_) {}
+        }
+        return res.json({ ok: true, deleted, errors });
+      } catch (e) {
+        return res.status(500).json({ error: e.message || String(e) });
       }
     }
 
