@@ -36,3 +36,10 @@ backend/src/automation/profiles/
 *.sqlite-wal
 *.sqlite-journal
 *.db
+
+# Python venv
+backend/.venv/
+backend/src/automation/.venv/
+
+# Screenshots / debug images
+backend/*.png
