@@ -43,3 +43,14 @@ backend/src/automation/.venv/
 
 # Screenshots / debug images
 backend/*.png
+
+# Python venv / caches
+backend/.venv/
+backend/src/automation/__pycache__/
+
+# Scratch / temp automation artifacts
+.trash/
+backend/src/automation/cf_api_token_pure.py
+backend/src/automation/cf_apikey_diagnostic.py
+backend/src/automation/test_playwright.py
+backend/src/automation/vercel_relay_proxy.py
